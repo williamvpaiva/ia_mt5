@@ -4,12 +4,12 @@ from datetime import datetime
 
 class BotBase(BaseModel):
     name: str
-    symbol: str = "WIN$"
+    symbol: str = "WINM26"
     timeframe: str = "M5"
     magic_number: int
     max_spread: float = 5.0
     max_slippage: float = 3.0
-    allowed_symbols: List[str] = ["WIN$", "WINM26"]
+    allowed_symbols: List[str] = Field(default_factory=lambda: ["WINM26"])
     trading_schedule: Optional[Dict] = None
     excluded_days: Optional[List[int]] = Field(default_factory=list)
     start_time: Optional[str] = "09:00"
@@ -28,6 +28,7 @@ class BotUpdate(BaseModel):
     symbol: Optional[str] = None
     timeframe: Optional[str] = None
     active: Optional[bool] = None
+    magic_number: Optional[int] = None
     max_spread: Optional[float] = None
     max_slippage: Optional[float] = None
     allowed_symbols: Optional[List[str]] = None

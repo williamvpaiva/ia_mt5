@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .mt5_client import mt5_client
 from ..models.historical_data import HistoricalData
 from ..core.database import SessionLocal
+from .bot_log_service import write_bot_log
 from .progress_manager import progress_manager
 
 logger = logging.getLogger("DataCollector")
@@ -141,6 +142,18 @@ class DataCollector:
             
             if bot_id:
                 progress_manager.update_progress(bot_id, "sync", 10, "Conectando ao MT5...")
+                write_bot_log(
+                    level="INFO",
+                    context="sync",
+                    message=f"Sincronizacao iniciada para {self.symbol}",
+                    details={
+                        "action": "sync_start",
+                        "bot_id": bot_id,
+                        "symbol": self.symbol,
+                        "timeframe": self.timeframe,
+                        "count": count,
+                    },
+                )
             
             logger.info(f"Sincronizando {count} candles: {self.symbol} ({self.timeframe})")
             rates = await mt5_client.get_rates(self.symbol, self.timeframe, count=count)
@@ -195,6 +208,19 @@ class DataCollector:
                 progress_manager.update_progress(bot_id, "sync", 100, "Concluido!")
                 # Limpa apA?s um tempo
                 asyncio.create_task(self._delayed_clear_progress(bot_id))
+                write_bot_log(
+                    level="INFO",
+                    context="sync",
+                    message=f"Sincronizacao concluida para {self.symbol}",
+                    details={
+                        "action": "sync_complete",
+                        "bot_id": bot_id,
+                        "symbol": self.symbol,
+                        "timeframe": self.timeframe,
+                        "new_records": new_records,
+                        "total_processed": self.records_processed,
+                    },
+                )
             
             result = {
                 "success": True,
@@ -211,6 +237,19 @@ class DataCollector:
         except Exception as e:
             db.rollback()
             logger.error(f"Erro na sincronizaA?A?o: {e}")
+            if bot_id:
+                write_bot_log(
+                    level="ERROR",
+                    context="sync",
+                    message=f"Erro na sincronizacao para {self.symbol}",
+                    details={
+                        "action": "sync_error",
+                        "bot_id": bot_id,
+                        "symbol": self.symbol,
+                        "timeframe": self.timeframe,
+                        "error": str(e),
+                    },
+                )
             return {"success": False, "error": str(e), "new_records": 0}
         finally:
             db.close()

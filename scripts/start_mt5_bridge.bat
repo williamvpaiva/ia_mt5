@@ -1,10 +1,13 @@
 @echo off
+setlocal
 echo ========================================
 echo   IA_MT5 Bridge - MetaTrader 5 Bridge
 echo ========================================
 echo.
 echo Iniciando MT5 Bridge API...
 echo.
+
+pushd "%~dp0"
 
 REM Verifica se o Python está instalado
 python --version >nul 2>&1
@@ -23,9 +26,13 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Inicia a MT5 Bridge
-echo Iniciando servidor UVICORN na porta 5000...
-echo.
-python -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5000 --reload
+if "%MT5_BRIDGE_HOST%"=="" set MT5_BRIDGE_HOST=0.0.0.0
+if "%MT5_BRIDGE_PORT%"=="" set MT5_BRIDGE_PORT=5001
 
+REM Inicia a MT5 Bridge
+echo Iniciando servidor UVICORN em %MT5_BRIDGE_HOST%:%MT5_BRIDGE_PORT%...
+echo.
+python -m uvicorn mt5_bridge:app --host %MT5_BRIDGE_HOST% --port %MT5_BRIDGE_PORT% --reload
+
+popd
 pause

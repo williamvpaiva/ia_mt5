@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         return self.OLLAMA_MODEL_DEV  # Modelo mais potente
     
     # ========== MT5 BRIDGE ==========
-    MT5_BRIDGE_URL: str = "http://localhost:5000"
+    MT5_BRIDGE_URL: str = "http://127.0.0.1:5001"
     MT5_BRIDGE_TIMEOUT: int = 30
     
     # ========== SECURITY ==========
@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "json"  # json ou text
     
     # ========== TRADING ==========
-    DEFAULT_SYMBOL: str = "WIN"
+    DEFAULT_SYMBOL: str = "WINM26"
     DEFAULT_TIMEFRAME: str = "M5"
     MAX_POSITIONS_PER_BOT: int = 3
     MAX_DAILY_LOSS_PERCENT: float = 5.0

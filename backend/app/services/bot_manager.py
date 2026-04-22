@@ -113,6 +113,7 @@ class BotManager:
             self.set_trading_schedule(bot_id, trading_schedule)
         
         instance = TradingBotInstance(bot_id)
+        await instance.load_config()
         self.active_bots[bot_id] = instance
         
         # Cria uma tarefa asyncio para o loop do robA?

@@ -41,14 +41,14 @@ start_mt5_bridge.bat
 
 ```bash
 cd D:\PROJETOS\IA_MT5\scripts
-python -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5000 --reload
+python -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5001 --reload
 ```
 
 ### Opção 3: PowerShell com Python path absoluto
 
 ```powershell
 cd D:\PROJETOS\IA_MT5\scripts
-py -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5000 --reload
+py -m uvicorn mt5_bridge:app --host 0.0.0.0 --port 5001 --reload
 ```
 
 ## Verificação
@@ -57,7 +57,7 @@ Após iniciar, teste a bridge:
 
 ```bash
 # Health check
-curl http://localhost:5000/health
+curl http://localhost:5001/health
 
 # Deve retornar:
 # {"status":"ok","mt5_connected":true}
@@ -79,19 +79,19 @@ curl http://localhost:5000/health
 ### Buscar cotações WIN$
 
 ```bash
-curl "http://localhost:5000/rates/WIN$?timeframe=M5&count=100"
+curl "http://localhost:5001/rates/WIN$?timeframe=M5&count=100"
 ```
 
 ### Buscar tick atual
 
 ```bash
-curl "http://localhost:5000/tick/WIN$"
+curl "http://localhost:5001/tick/WIN$"
 ```
 
 ### Criar ordem de compra
 
 ```bash
-curl -X POST "http://localhost:5000/order" \
+curl -X POST "http://localhost:5001/order" \
   -H "Content-Type: application/json" \
   -d "{
     \"symbol\": \"WIN$\",
@@ -107,7 +107,7 @@ curl -X POST "http://localhost:5000/order" \
 ### Listar posições
 
 ```bash
-curl "http://localhost:5000/positions"
+curl "http://localhost:5001/positions"
 ```
 
 ## Configuração no Docker
@@ -118,12 +118,12 @@ O docker-compose já está configurado para conectar na bridge:
 services:
   backend:
     environment:
-      - MT5_BRIDGE_URL=http://host.docker.internal:5000
+      - MT5_BRIDGE_URL=http://host.docker.internal:5001
     extra_hosts:
       - "host.docker.internal:host-gateway"
 ```
 
-Isso permite que o container acesse `host.docker.internal:5000` que aponta para `localhost:5000` no Windows.
+Isso permite que o container acesse `host.docker.internal:5001` que aponta para `localhost:5001` no Windows.
 
 ## Troubleshooting
 
@@ -143,13 +143,13 @@ py -m pip install MetaTrader5
 
 ### Erro: "All connection attempts failed" (Backend)
 
-- Verifique se a bridge está rodando (`curl http://localhost:5000/health`)
+- Verifique se a bridge está rodando (`curl http://localhost:5001/health`)
 - Verifique se o container consegue acessar o host (`host.docker.internal`)
 - Reinicie o container: `docker restart ia_mt5_backend`
 
 ### Bridge não inicia
 
-1. Verifique se a porta 5000 não está em uso
+1. Verifique se a porta 5001 não está em uso
 2. Tente outra porta: `--port 5001`
 3. Atualize o `.env`: `MT5_BRIDGE_URL=http://host.docker.internal:5001`
 
@@ -157,14 +157,14 @@ py -m pip install MetaTrader5
 
 1. **Abrir MT5 Terminal** e logar na conta
 2. **Iniciar MT5 Bridge**: `start_mt5_bridge.bat`
-3. **Verificar saúde**: `curl http://localhost:5000/health`
+3. **Verificar saúde**: `curl http://localhost:5001/health`
 4. **Iniciar Docker**: `docker-compose --profile full up -d`
 5. **Acessar frontend**: `http://localhost:8501`
 
 ## Segurança
 
 - A bridge roda apenas em `localhost` (não exponha para rede externa)
-- Use firewall para bloquear acesso externo à porta 5000
+- Use firewall para bloquear acesso externo à porta 5001
 - Em produção, implemente autenticação na API
 
 ## Próximos Passos

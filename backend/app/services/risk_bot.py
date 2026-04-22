@@ -6,6 +6,7 @@ Prioridade: ALTA
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models.bot import Bot
@@ -26,6 +27,7 @@ class RiskBotConfig:
         max_positions: int = 3,             # MA?ximo de posiA?A?es abertas
         max_daily_trades: int = 10,         # MA?ximo de trades por dia
         max_daily_loss: float = 5.0,        # Perda mA?xima diA?ria (%)
+        daily_profit_limit: float = 0.0,    # Meta diA?ria em valor absoluto
         max_position_size: float = 10.0,   # Tamanho mA?ximo da posiA?A?o
         min_position_size: float = 0.1,     # Tamanho mA?nimo da posiA?A?o
         risk_per_trade_pct: float = 1.0,   # Risco por trade (%)
@@ -42,6 +44,7 @@ class RiskBotConfig:
         self.max_positions = max_positions
         self.max_daily_trades = max_daily_trades
         self.max_daily_loss = max_daily_loss
+        self.daily_profit_limit = daily_profit_limit
         self.max_position_size = max_position_size
         self.min_position_size = min_position_size
         self.risk_per_trade_pct = risk_per_trade_pct
@@ -65,10 +68,39 @@ class RiskBot:
     
     def _load_config_from_bot(self, bot: Bot) -> RiskBotConfig:
         """Carregar configuraA?A?o do bot ou usar padrA?es"""
-        if bot.config and isinstance(bot.config, dict):
-            config_data = bot.config.get('risk', {})
-            return RiskBotConfig(**config_data)
-        return RiskBotConfig()
+        config_data = {}
+
+        if getattr(bot, "risk_config", None) and isinstance(bot.risk_config, dict):
+            config_data = bot.risk_config
+        elif bot.config and isinstance(bot.config, dict):
+            config_data = bot.config.get('risk', {}) or {}
+
+        trailing_stop = config_data.get("trailing_stop", False)
+        if isinstance(trailing_stop, dict):
+            trailing_stop_active = bool(trailing_stop.get("active", False))
+            trailing_stop_distance = float(trailing_stop.get("distance", 1.0) or 1.0)
+        else:
+            trailing_stop_active = bool(trailing_stop)
+            trailing_stop_distance = float(config_data.get("trailing_stop_distance", 1.0) or 1.0)
+
+        return RiskBotConfig(
+            stop_loss_pct=float(config_data.get("stop_loss_pct", config_data.get("stop_loss", 2.0)) or 2.0),
+            take_profit_pct=float(config_data.get("take_profit_pct", config_data.get("take_profit", 4.0)) or 4.0),
+            trailing_stop=trailing_stop_active,
+            trailing_stop_distance=trailing_stop_distance,
+            max_positions=int(config_data.get("max_positions", 3) or 3),
+            max_daily_trades=int(config_data.get("max_daily_trades", 10) or 10),
+            max_daily_loss=float(config_data.get("max_daily_loss", config_data.get("daily_loss_limit", 5.0)) or 5.0),
+            daily_profit_limit=float(config_data.get("daily_profit_limit", 0.0) or 0.0),
+            max_position_size=float(config_data.get("max_position_size", 10.0) or 10.0),
+            min_position_size=float(config_data.get("min_position_size", 0.1) or 0.1),
+            risk_per_trade_pct=float(config_data.get("risk_per_trade_pct", config_data.get("max_risk_per_trade", 1.0)) or 1.0),
+            breakeven_enabled=bool(config_data.get("breakeven_enabled", False)),
+            breakeven_trigger=float(config_data.get("breakeven_trigger", 1.0) or 1.0),
+            partial_close=bool(config_data.get("partial_close", False)),
+            partial_close_pct=float(config_data.get("partial_close_pct", 50.0) or 50.0),
+            partial_close_trigger=float(config_data.get("partial_close_trigger", 2.0) or 2.0),
+        )
     
     def __del__(self):
         """Fechar sessA?o do banco"""
@@ -97,6 +129,10 @@ class RiskBot:
         # Verificar limite de perda diA?ria
         if not self.check_daily_loss_limit():
             return False, f"Daily loss limit ({self.config.max_daily_loss}%) exceeded"
+
+        # Verificar meta diaria de lucro
+        if not self.check_daily_profit_limit():
+            return False, f"Daily profit limit ({self.config.daily_profit_limit}) reached"
         
         # Verificar tamanho da posiA?A?o
         if not self.check_position_size(volume):
@@ -145,7 +181,7 @@ class RiskBot:
                 Trade.close_time.isnot(None)
             ).all()
             
-            daily_pnl = sum(t.pnl or 0 for t in daily_trades)
+            daily_pnl = sum((t.profit if t.profit is not None else t.pnl or 0) for t in daily_trades)
             
             # Calcular % de perda (simplificado - assumindo saldo fixo)
             # Em produA?A?o, usar saldo real da conta
@@ -155,6 +191,25 @@ class RiskBot:
             return daily_loss_pct < self.config.max_daily_loss
         except Exception as e:
             logger.error(f"Error checking daily loss limit: {e}")
+            return True
+
+    def check_daily_profit_limit(self) -> bool:
+        """Verificar meta de lucro diária"""
+        try:
+            if self.config.daily_profit_limit <= 0:
+                return True
+
+            today = datetime.utcnow().date()
+            daily_trades = self.db.query(Trade).filter(
+                Trade.bot_id == self.bot.id,
+                func.date(Trade.close_time) == today,
+                Trade.close_time.isnot(None)
+            ).all()
+
+            daily_profit = sum((t.profit if t.profit is not None else t.pnl or 0) for t in daily_trades)
+            return daily_profit < self.config.daily_profit_limit
+        except Exception as e:
+            logger.error(f"Error checking daily profit limit: {e}")
             return True
     
     def check_position_size(self, volume: float) -> bool:
@@ -305,14 +360,14 @@ class RiskBot:
                 func.date(Trade.close_time) == today,
                 Trade.close_time.isnot(None)
             ).all()
-            daily_pnl_total = sum(t.pnl or 0 for t in daily_pnl)
+            daily_pnl_total = sum((t.profit if t.profit is not None else t.pnl or 0) for t in daily_pnl)
             
             # PnL total
             all_closed = self.db.query(Trade).filter(
                 Trade.bot_id == self.bot.id,
                 Trade.close_time.isnot(None)
             ).all()
-            total_pnl = sum(t.pnl or 0 for t in all_closed)
+            total_pnl = sum((t.profit if t.profit is not None else t.pnl or 0) for t in all_closed)
             
             # Win rate
             winning = len([t for t in all_closed if (t.pnl or 0) > 0])
@@ -333,6 +388,7 @@ class RiskBot:
                 "stop_loss_pct": self.config.stop_loss_pct,
                 "take_profit_pct": self.config.take_profit_pct,
                 "trailing_stop": self.config.trailing_stop,
+                "daily_profit_limit": self.config.daily_profit_limit,
             }
         except Exception as e:
             logger.error(f"Error getting risk metrics: {e}")
@@ -348,6 +404,7 @@ class RiskBot:
             ("Positions limit", self.check_positions_limit()),
             ("Daily trades limit", self.check_daily_trades_limit()),
             ("Daily loss limit", self.check_daily_loss_limit()),
+            ("Daily profit limit", self.check_daily_profit_limit()),
         ]
         
         for name, passed in checks:

@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import time
 
-from .api.routes import bots, trades, dashboard, events, backtest as backtest_router
+from .api.routes import bots, trades, dashboard, events, backtest as backtest_router, mt5 as mt5_router
 from .api.websocket_manager import router as ws_router
 from .core.database import engine, Base
 from .core.config import settings
@@ -170,6 +170,7 @@ app.include_router(trades.router, prefix="/trades", tags=["Trades"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(events.router, prefix="/events", tags=["Events"])
 app.include_router(backtest_router.router, prefix="/backtest", tags=["Backtesting"])
+app.include_router(mt5_router.router)
 app.include_router(ws_router)  # WebSocket
 
 

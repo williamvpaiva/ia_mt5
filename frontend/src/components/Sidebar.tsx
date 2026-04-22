@@ -1,4 +1,4 @@
-import { LayoutDashboard, Bot, Brain, FlaskConical, Settings, LogOut, History } from 'lucide-react';
+import { LayoutDashboard, Bot, Brain, FlaskConical, Settings, LogOut, History, ScrollText } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface SidebarProps {
@@ -9,6 +9,7 @@ interface SidebarProps {
 const menuItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'bots', label: 'Meus Bots', icon: Bot },
+  { id: 'logs', label: 'Logs dos Bots', icon: ScrollText },
   { id: 'trades', label: 'Operações', icon: History },
   { id: 'news', label: 'IA & Notícias', icon: Brain },
   { id: 'backtesting', label: 'Backtesting', icon: FlaskConical },

@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from ..core.database import SessionLocal
 from .data_collector import data_collector
+from .bot_log_service import write_bot_log
 from ..models.bot import Bot
 from ..models.historical_data import HistoricalData
 from .progress_manager import progress_manager
@@ -30,6 +31,19 @@ class Trainer:
                 logger.error(f"Bot {bot_id} nA?o encontrado")
                 progress_manager.clear_progress(bot_id)
                 return
+
+            write_bot_log(
+                level="INFO",
+                context="train",
+                message=f"Treinamento iniciado para {bot.name}",
+                details={
+                    "action": "train_start",
+                    "bot_id": bot.id,
+                    "bot_name": bot.name,
+                    "symbol": bot.symbol,
+                    "timeframe": bot.timeframe,
+                },
+            )
 
             # Passo 1: SincronizaA?A?o Incremental
             progress_manager.update_progress(bot_id, "train", 15, "Sincronizando dados histA?ricos...")
@@ -105,6 +119,21 @@ class Trainer:
             # Limpa apA?s 5 segundos
             await asyncio.sleep(5)
             progress_manager.clear_progress(bot_id)
+
+            write_bot_log(
+                level="INFO",
+                context="train",
+                message=f"Treinamento concluido para {bot.name}",
+                details={
+                    "action": "train_complete",
+                    "bot_id": bot.id,
+                    "bot_name": bot.name,
+                    "symbol": bot.symbol,
+                    "timeframe": bot.timeframe,
+                    "samples": len(records),
+                    "model_path": model_path,
+                },
+            )
             
             return {"success": True, "samples": len(records)}
 
@@ -112,6 +141,18 @@ class Trainer:
             db.rollback()
             logger.error(f"Erro no treinamento do bot {bot_id}: {e}")
             progress_manager.update_progress(bot_id, "train", 0, f"Erro: {str(e)}")
+            bot_name = bot.name if "bot" in locals() and bot else f"Bot {bot_id}"
+            write_bot_log(
+                level="ERROR",
+                context="train",
+                message=f"Erro no treinamento para {bot_name}",
+                details={
+                    "action": "train_error",
+                    "bot_id": bot_id,
+                    "bot_name": bot_name,
+                    "error": str(e),
+                },
+            )
             return {"success": False, "error": str(e)}
         finally:
             db.close()

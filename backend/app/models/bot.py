@@ -14,7 +14,7 @@ class Bot(Base):
     # ========== CAMPOS ORIGINAIS ==========
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
-    symbol = Column(String, default="WIN")
+    symbol = Column(String, default="WINM26")
     timeframe = Column(String, default="M5")
     active = Column(Boolean, default=False)
     magic_number = Column(Integer, unique=True, index=True)
@@ -48,6 +48,8 @@ class Bot(Base):
         "trailing_stop": {"active": False, "distance": 150, "step": 10},
         "daily_loss_limit": 500.0,
         "daily_profit_limit": 1000.0,
+        "max_positions": 3,
+        "max_daily_trades": 10,
         "max_risk_per_trade": 0.02 # 2% da banca
     })
     

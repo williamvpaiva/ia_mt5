@@ -643,4 +643,4 @@ class BacktestEngine:
 
 
 # InstA?ncia global
-backtest_engine = BacktestEngine(symbol="WIN", timeframe="M5")
+backtest_engine = BacktestEngine(symbol="WINM26", timeframe="M5")
