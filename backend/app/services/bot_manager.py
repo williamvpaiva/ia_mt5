@@ -9,6 +9,8 @@ from typing import Dict, Optional, List
 from datetime import datetime, time, timedelta
 from dataclasses import dataclass
 
+from ..core.database import SessionLocal
+from ..models.bot import Bot
 from .trading_bot import TradingBotInstance
 from .mt5_client import mt5_client
 
@@ -32,13 +34,14 @@ class TradingSchedule:
         """Verificar se estA? dentro do horA?rio de trading"""
         if not self.enabled:
             return True  # Sem restriA?A?es
-        
+
         now = current_time or datetime.now()
-        
+        current_day = (now.weekday() + 1) % 7
+
         # Verificar dia da semana
-        if now.weekday() + 1 not in self.trading_days:
+        if current_day not in self.trading_days:
             return False
-        
+
         # Verificar horA?rio
         current = now.time()
         if self.start_time <= self.end_time:
@@ -51,18 +54,20 @@ class TradingSchedule:
     def time_until_next_session(self) -> timedelta:
         """Tempo atA? a prA?xima sessA?o de trading"""
         now = datetime.now()
-        
+        current_day = (now.weekday() + 1) % 7
+
         # Se estamos em dia de trading e antes do horA?rio de inA?cio
-        if now.weekday() + 1 in self.trading_days:
+        if current_day in self.trading_days:
             if now.time() < self.start_time:
                 next_start = datetime.combine(now.date(), self.start_time)
                 return next_start - now
-        
+
         # Encontrar prA?ximo dia de trading
         days_ahead = 1
         while days_ahead <= 7:
             next_date = now + timedelta(days=days_ahead)
-            if next_date.weekday() + 1 in self.trading_days:
+            next_day = (next_date.weekday() + 1) % 7
+            if next_day in self.trading_days:
                 next_start = datetime.combine(next_date.date(), self.start_time)
                 return next_start - now
             days_ahead += 1
@@ -78,6 +83,8 @@ class BotManager:
         self.tasks: Dict[int, asyncio.Task] = {}
         self.trading_schedules: Dict[int, TradingSchedule] = {}
         self.trading_paused: Dict[int, bool] = {}
+        self.pause_until: Dict[int, datetime] = {}
+        self.pause_reasons: Dict[int, str] = {}
         logger.info("BotManager inicializado com TradingSchedule")
     
     def set_trading_schedule(self, bot_id: int, schedule: TradingSchedule):
@@ -88,12 +95,32 @@ class BotManager:
     def get_trading_schedule(self, bot_id: int) -> Optional[TradingSchedule]:
         """Obter horA?rio de trading de um bot"""
         return self.trading_schedules.get(bot_id)
+
+    def _schedule_from_bot(self, bot: Bot) -> Optional[TradingSchedule]:
+        """Converter o JSON persistido em TradingSchedule."""
+        if not bot.trading_schedule:
+            return None
+
+        try:
+            ts = bot.trading_schedule
+            return TradingSchedule(
+                enabled=ts.get("enabled", True),
+                start_time=time.fromisoformat(ts.get("start_time", "09:00")),
+                end_time=time.fromisoformat(ts.get("end_time", "17:00")),
+                trading_days=ts.get("trading_days", [1, 2, 3, 4, 5]),
+            )
+        except Exception as e:
+            logger.warning("Falha ao parsear schedule do bot %s: %s", bot.id, e)
+            return None
     
     def can_trade(self, bot_id: int) -> bool:
         """Verificar se o bot pode executar trades no momento"""
-        # Verificar se estA? pausado
         if self.trading_paused.get(bot_id, False):
-            return False
+            pause_until = self.pause_until.get(bot_id)
+            if pause_until and datetime.now() >= pause_until:
+                self.resume_trading(bot_id)
+            else:
+                return False
         
         # Verificar horA?rio de trading
         schedule = self.trading_schedules.get(bot_id)
@@ -122,6 +149,28 @@ class BotManager:
         
         logger.info(f"Bot {bot_id} iniciado pelo Manager.")
         return True
+
+    async def restore_active_bots(self) -> List[int]:
+        """Recriar tarefas para robos marcados como ativos no banco."""
+        db = SessionLocal()
+        restored: List[int] = []
+        try:
+            bots = db.query(Bot).filter(Bot.active.is_(True)).all()
+            for bot in bots:
+                if bot.id in self.tasks:
+                    continue
+
+                schedule = self._schedule_from_bot(bot)
+                success = await self.start_bot(bot.id, trading_schedule=schedule)
+                if success:
+                    restored.append(bot.id)
+                    logger.info("Bot %s restaurado no startup.", bot.id)
+                else:
+                    logger.warning("Bot %s nao foi restaurado no startup.", bot.id)
+        finally:
+            db.close()
+
+        return restored
     
     async def _bot_loop(self, bot_id: int, instance: TradingBotInstance):
         """Loop principal do bot com verificaA?A?o de horA?rios"""
@@ -132,11 +181,22 @@ class BotManager:
                     # Executar ciclo do bot
                     await instance.run_cycle()
                 else:
-                    schedule = self.trading_schedules.get(bot_id)
-                    if schedule:
-                        wait_time = schedule.time_until_next_session()
-                        logger.info(f"Bot {bot_id} aguardando prA?xima sessA?o: {wait_time}")
-                        await asyncio.sleep(min(wait_time.total_seconds(), 60))  # Max 1 min
+                    if self.trading_paused.get(bot_id, False):
+                        pause_until = self.pause_until.get(bot_id)
+                        if pause_until:
+                            remaining = (pause_until - datetime.now()).total_seconds()
+                            if remaining <= 0:
+                                self.resume_trading(bot_id)
+                                continue
+                            await asyncio.sleep(min(max(remaining, 1.0), 60.0))
+                        else:
+                            await asyncio.sleep(60)
+                    else:
+                        schedule = self.trading_schedules.get(bot_id)
+                        if schedule:
+                            wait_time = schedule.time_until_next_session()
+                            logger.info(f"Bot {bot_id} aguardando prA?xima sessA?o: {wait_time}")
+                            await asyncio.sleep(min(wait_time.total_seconds(), 60))  # Max 1 min
                 
                 await asyncio.sleep(5)  # Intervalo entre ciclos
         except asyncio.CancelledError:
@@ -185,14 +245,20 @@ class BotManager:
         return True
     
     
-    def pause_trading(self, bot_id: int):
+    def pause_trading(self, bot_id: int, reason: Optional[str] = None, until: Optional[datetime] = None):
         """Pausar trading temporariamente"""
         self.trading_paused[bot_id] = True
+        if reason:
+            self.pause_reasons[bot_id] = reason
+        if until:
+            self.pause_until[bot_id] = until
         logger.info(f"Trading pausado para bot {bot_id}")
     
     def resume_trading(self, bot_id: int):
         """Retomar trading"""
         self.trading_paused[bot_id] = False
+        self.pause_reasons.pop(bot_id, None)
+        self.pause_until.pop(bot_id, None)
         logger.info(f"Trading retomado para bot {bot_id}")
     
     def get_status(self, bot_id: int) -> Dict:
@@ -205,6 +271,8 @@ class BotManager:
             "running": is_running,
             "can_trade": self.can_trade(bot_id) if is_running else False,
             "paused": self.trading_paused.get(bot_id, False),
+            "pause_reason": self.pause_reasons.get(bot_id),
+            "pause_until": self.pause_until.get(bot_id).isoformat() if self.pause_until.get(bot_id) else None,
             "has_schedule": schedule is not None,
         }
         

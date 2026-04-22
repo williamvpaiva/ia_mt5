@@ -14,8 +14,11 @@ type DashboardSnapshot = {
   timestamp?: string;
   symbol?: string;
   mt5_connected?: boolean;
+  terminal_connected?: boolean;
   bridge_uptime_seconds?: number;
   terminal_name?: string;
+  bridge_status?: string;
+  bridge_last_error?: string | null;
   account_login?: number | null;
   account_name?: string | null;
   account_server?: string | null;
@@ -39,6 +42,9 @@ type DashboardSnapshot = {
   account_profit?: number;
   symbol_spread?: number;
   historical_daily_pnl?: number;
+  running_bots?: number;
+  paused_bots?: number;
+  metrics_source?: string;
   recent_trades?: Array<Record<string, any>>;
   open_positions_detail?: Array<Record<string, any>>;
   equity_point?: {
@@ -61,6 +67,8 @@ type IndicatorKey =
   | 'win_rate'
   | 'max_drawdown'
   | 'active_bots'
+  | 'running_bots'
+  | 'paused_bots'
   | 'total_candles'
   | 'daily_realized_pnl'
   | 'historical_daily_pnl'
@@ -89,6 +97,8 @@ const DASHBOARD_INDICATORS: IndicatorOption[] = [
   { id: 'win_rate', label: 'Win rate', defaultVisible: true },
   { id: 'max_drawdown', label: 'Drawdown', defaultVisible: true },
   { id: 'active_bots', label: 'Bots ativos', defaultVisible: true },
+  { id: 'running_bots', label: 'Bots em execução', defaultVisible: true },
+  { id: 'paused_bots', label: 'Bots pausados', defaultVisible: false },
   { id: 'total_candles', label: 'Velas', defaultVisible: false },
   { id: 'daily_realized_pnl', label: 'PnL realizado', defaultVisible: false },
   { id: 'historical_daily_pnl', label: 'PnL histórico', defaultVisible: false },
@@ -164,8 +174,13 @@ const normalizeSnapshot = (payload: any): DashboardSnapshot => {
     account_profit: 0,
     symbol_spread: 0,
     historical_daily_pnl: 0,
+    running_bots: 0,
+    paused_bots: 0,
     recent_trades: [],
     open_positions_detail: [],
+    bridge_last_error: null,
+    bridge_status: 'degraded',
+    metrics_source: 'mt5_live',
     ...source,
   };
 
@@ -226,8 +241,10 @@ function App() {
     appendEquityPoint(snapshot);
   };
 
-  const fetchDashboard = async () => {
-    setRefreshing(true);
+  const fetchDashboard = async (silent = false) => {
+    if (!silent) {
+      setRefreshing(true);
+    }
     try {
       const response = await fetch(`${apiBase}/dashboard/live?t=${Date.now()}`, {
         cache: 'no-store',
@@ -241,7 +258,9 @@ function App() {
       applySnapshot(data);
       setTransportMode((prev) => (prev === 'offline' ? 'polling' : prev));
     } finally {
-      setRefreshing(false);
+      if (!silent) {
+        setRefreshing(false);
+      }
     }
   };
 
@@ -255,10 +274,10 @@ function App() {
   const startPolling = () => {
     if (pollRef.current !== null) return;
     pollRef.current = window.setInterval(() => {
-      fetchDashboard().catch((error) => {
+      fetchDashboard(true).catch((error) => {
         console.error('Erro ao atualizar dashboard:', error);
       });
-    }, 5000);
+    }, 10000);
   };
 
   useEffect(() => {
@@ -281,7 +300,6 @@ function App() {
         socket.onopen = () => {
           if (cancelled) return;
           setTransportMode('websocket');
-          stopPolling();
         };
 
         socket.onmessage = (event) => {
@@ -318,6 +336,7 @@ function App() {
       startPolling();
     });
 
+    startPolling();
     connectDashboardStream();
 
     return () => {
@@ -327,6 +346,8 @@ function App() {
       wsRef.current = null;
     };
   }, [activeTab, apiBase, wsBase]);
+
+  const historicalDailyPnL = dashboard.historical_daily_pnl || dashboard.daily_realized_pnl;
 
   const dashboardCards = [
     {
@@ -411,11 +432,27 @@ function App() {
     },
     {
       id: 'active_bots' as IndicatorKey,
-      label: 'Bots ativos',
+      label: 'Bots no cadastro',
       value: `${dashboard.active_bots ?? 0}`,
-      delta: dashboard.mt5_connected ? 'MT5 ON' : 'MT5 OFF',
-      deltaLabel: dashboard.terminal_name || 'terminal',
+      delta: `${dashboard.running_bots ?? 0}`,
+      deltaLabel: 'em execução',
       isPositive: (dashboard.active_bots ?? 0) > 0,
+    },
+    {
+      id: 'running_bots' as IndicatorKey,
+      label: 'Bots em execução',
+      value: `${dashboard.running_bots ?? 0}`,
+      delta: `${dashboard.active_bots ?? 0}`,
+      deltaLabel: 'cadastro',
+      isPositive: (dashboard.running_bots ?? 0) > 0,
+    },
+    {
+      id: 'paused_bots' as IndicatorKey,
+      label: 'Bots pausados',
+      value: `${dashboard.paused_bots ?? 0}`,
+      delta: dashboard.mt5_connected ? 'MT5 ON' : 'MT5 OFF',
+      deltaLabel: 'estado',
+      isPositive: (dashboard.paused_bots ?? 0) === 0,
     },
     {
       id: 'total_candles' as IndicatorKey,
@@ -436,10 +473,10 @@ function App() {
     {
       id: 'historical_daily_pnl' as IndicatorKey,
       label: 'PnL histórico',
-      value: `R$ ${formatMoney(dashboard.historical_daily_pnl ?? dashboard.daily_realized_pnl)}`,
+      value: `R$ ${formatMoney(historicalDailyPnL)}`,
       delta: `${dashboard.closed_trades ?? 0}`,
       deltaLabel: 'fechados',
-      isPositive: (dashboard.historical_daily_pnl ?? 0) >= 0,
+      isPositive: historicalDailyPnL >= 0,
     },
     {
       id: 'account_margin' as IndicatorKey,
@@ -499,11 +536,19 @@ function App() {
   const recentTrades = dashboard.recent_trades || [];
   const openPositions = dashboard.open_positions_detail || [];
   const updatedAtLabel = lastUpdated ? new Date(lastUpdated).toLocaleString('pt-BR') : '--';
+  const dataAgeSeconds = lastUpdated ? Math.max(0, Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 1000)) : null;
+  const isMt5Degraded = !dashboard.mt5_connected || dashboard.bridge_status === 'degraded' || transportMode === 'offline';
 
   return (
     <div className="flex bg-bg-dark text-white min-h-screen font-sans">
       <NotificationOverlay />
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        mt5Connected={dashboard.mt5_connected}
+        transportMode={transportMode}
+        lastUpdated={lastUpdated}
+      />
 
       <main className="flex-1 overflow-y-auto p-8">
         {activeTab === 'dashboard' && (
@@ -538,6 +583,10 @@ function App() {
                   Última atualização: {updatedAtLabel}
                   {dashboard.symbol ? ` • ${dashboard.symbol}` : ''}
                 </p>
+                <p className="text-xs text-gray-500">
+                  {dataAgeSeconds !== null ? `Dados atualizados há ${dataAgeSeconds}s` : 'Dados ainda não carregados'}
+                  {dashboard.metrics_source ? ` • fonte: ${dashboard.metrics_source === 'mt5_live+db' ? 'MT5 + banco' : 'MT5 vivo'}` : ''}
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 min-w-[320px]">
@@ -564,6 +613,43 @@ function App() {
                 </div>
               </div>
             </header>
+
+            {isMt5Degraded && (
+              <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-red-300 mb-2">Atenção</p>
+                  <h3 className="text-lg font-black text-white">MT5 desconectado ou com dados degradados</h3>
+                  <p className="text-sm text-red-100/80 mt-1">
+                    A ponte do MetaTrader pode estar offline ou atrasada. O dashboard segue atualizando com o último snapshot e com polling de backup.
+                  </p>
+                  {dashboard.bridge_last_error && (
+                    <p className="text-xs text-red-200/70 mt-2 break-words">
+                      Último erro da bridge: {dashboard.bridge_last_error}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => fetchDashboard().catch((error) => console.error(error))}
+                  className="px-4 py-3 rounded-2xl bg-red-500 text-white font-black uppercase tracking-[0.2em] text-xs hover:bg-red-400 transition-colors"
+                >
+                  Tentar reconectar
+                </button>
+              </div>
+            )}
+
+            {!isMt5Degraded && transportMode !== 'websocket' && (
+              <div className="rounded-3xl border border-amber-500/20 bg-amber-500/10 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-300">Fallback ativo</p>
+                  <p className="text-sm text-amber-100/80">
+                    O dashboard está atualizando por polling de segurança. A conexão principal ainda não foi estabilizada.
+                  </p>
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">
+                  {dataAgeSeconds !== null ? `latência ${dataAgeSeconds}s` : 'aguardando dados'}
+                </span>
+              </div>
+            )}
 
             <div className="bg-bg-card border border-border-card rounded-3xl p-5 space-y-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">

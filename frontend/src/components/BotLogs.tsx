@@ -14,9 +14,13 @@ type BotLogEntry = {
   timeframe?: string | null;
   action?: string | null;
   signal?: string | null;
+  decision?: string | null;
   market_state?: string | null;
   accepted?: boolean | null;
   reason?: string | null;
+  entry_block_reason?: string | null;
+  technical_summary?: string | null;
+  market_summary?: string | null;
   pnl?: number | null;
 };
 
@@ -36,10 +40,12 @@ type BotLogsPayload = {
 };
 
 const CONTEXT_LABELS: Record<string, { label: string; className: string }> = {
-  signal: { label: 'Sinal', className: 'bg-sky-500/10 text-sky-400 border-sky-500/20' },
-  trade_accept: { label: 'Aceite', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  trade_block: { label: 'Bloqueio', className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  trade_close: { label: 'Fecho', className: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
+  signal: { label: 'Mercado', className: 'bg-sky-500/10 text-sky-400 border-sky-500/20' },
+  trade_accept: { label: 'Trade iniciado', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  trade_block: { label: 'Operação rejeitada', className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  trade_close: { label: 'Encerramento', className: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
+  trade_error: { label: 'Erro de envio', className: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  dynamic_stop: { label: 'Stop dinâmico', className: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20' },
   train: { label: 'Treino', className: 'bg-brand-primary/10 text-brand-primary border-brand-primary/20' },
   sync: { label: 'Sync', className: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
   bot_admin: { label: 'Cadastro', className: 'bg-gray-700/60 text-gray-300 border-white/10' },
@@ -71,6 +77,26 @@ const formatMoney = (value?: number | null) =>
   (value ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const normalizeText = (value: any) => String(value ?? '').trim().toLowerCase();
+
+const formatSignalLabel = (value?: string | null) => {
+  const normalized = normalizeText(value);
+  if (normalized === 'buy') return 'COMPRA';
+  if (normalized === 'sell') return 'VENDA';
+  if (normalized === 'neutral') return 'NEUTRO';
+  if (normalized === 'idle') return 'AGUARDANDO';
+  if (!normalized) return '---';
+  return String(value).toUpperCase();
+};
+
+const formatMarketStateLabel = (value?: string | null) => {
+  const normalized = normalizeText(value);
+  if (normalized === 'bullish') return 'Alta';
+  if (normalized === 'bearish') return 'Baixa';
+  if (normalized === 'neutral') return 'Neutro';
+  if (normalized === 'idle') return 'Sem consenso';
+  if (!normalized) return 'Neutro';
+  return String(value);
+};
 
 export const BotLogs: React.FC = () => {
   const [logs, setLogs] = useState<BotLogEntry[]>([]);
@@ -144,14 +170,18 @@ export const BotLogs: React.FC = () => {
   const summary = {
     total: filteredLogs.length,
     accepted: filteredLogs.filter((log) => log.accepted === true).length,
-    rejected: filteredLogs.filter((log) => log.accepted === false || log.context === 'trade_block').length,
+    rejected: filteredLogs.filter((log) => log.accepted === false || log.context === 'trade_block' || log.context === 'trade_error').length,
     signals: filteredLogs.filter((log) => log.context === 'signal').length,
-    market: filteredLogs.filter((log) => log.context === 'signal' || log.context === 'trade_accept').length,
+    market: filteredLogs.filter(
+      (log) => log.context === 'signal' || log.context === 'trade_accept' || log.context === 'trade_block' || log.context === 'trade_error' || log.context === 'dynamic_stop',
+    ).length,
     train: filteredLogs.filter((log) => log.context === 'train').length,
     sync: filteredLogs.filter((log) => log.context === 'sync').length,
   };
 
-  const latestSignal = filteredLogs.find((log) => log.context === 'signal' || log.context === 'trade_accept' || log.context === 'trade_block');
+  const latestSignal = filteredLogs.find(
+    (log) => log.context === 'signal' || log.context === 'trade_accept' || log.context === 'trade_block' || log.context === 'trade_error' || log.context === 'dynamic_stop',
+  );
   const latestMarket = latestSignal?.details || {};
 
   return (
@@ -244,6 +274,7 @@ export const BotLogs: React.FC = () => {
               <option value="trade_accept">Aceites</option>
               <option value="trade_block">Bloqueios</option>
               <option value="trade_close">Fechos</option>
+              <option value="dynamic_stop">Stops dinamicos</option>
               <option value="train">Treinos</option>
               <option value="sync">Sync</option>
               <option value="bot_admin">Cadastro</option>
@@ -269,6 +300,7 @@ export const BotLogs: React.FC = () => {
               { key: 'signal', label: 'Sinais' },
               { key: 'trade_accept', label: 'Aceites' },
               { key: 'trade_block', label: 'Bloqueios' },
+              { key: 'dynamic_stop', label: 'Stops dinamicos' },
               { key: 'train', label: 'Treino' },
               { key: 'sync', label: 'Sync' },
             ].map((item) => {
@@ -314,14 +346,14 @@ export const BotLogs: React.FC = () => {
                         : 'bg-gray-700/60 text-gray-300 border-white/10'
                   }`}
                 >
-                  {latestSignal.market_state || 'neutral'}
+                  {formatMarketStateLabel(latestSignal.market_state)}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="bg-bg-dark/50 border border-white/5 rounded-2xl p-3">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-black mb-1">Decisao</p>
-                  <p className="font-black text-white">{latestSignal.signal || latestSignal.details?.decision || 'neutral'}</p>
+                  <p className="font-black text-white">{formatSignalLabel(latestSignal.signal || latestSignal.decision || latestSignal.details?.decision || 'neutral')}</p>
                 </div>
                 <div className="bg-bg-dark/50 border border-white/5 rounded-2xl p-3">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-black mb-1">Ativo</p>
@@ -337,13 +369,16 @@ export const BotLogs: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-bg-dark/50 border border-white/5 rounded-2xl p-4 space-y-3">
+                <div className="bg-bg-dark/50 border border-white/5 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-black">Sinais tecnicos</span>
                   <span className="text-[10px] uppercase tracking-[0.2em] text-brand-primary font-black">
                     {latestMarket.entry_allowed === false ? 'Entrada bloqueada' : 'Entrada avaliada'}
                   </span>
                 </div>
+                {latestMarket.technical_summary && (
+                  <p className="text-sm text-gray-300 leading-relaxed">{latestMarket.technical_summary}</p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {latestMarket.technical_signals &&
                     Object.entries(latestMarket.technical_signals).map(([key, value]) => (
@@ -429,12 +464,12 @@ export const BotLogs: React.FC = () => {
                                 ? 'bg-red-500/10 text-red-400 border-red-500/20'
                                 : 'bg-gray-700/60 text-gray-300 border-white/10'
                           }`}>
-                            {log.market_state}
+                            {formatMarketStateLabel(log.market_state)}
                           </span>
                         )}
                         {log.signal && (
                           <span className="px-2 py-1 rounded-lg font-black uppercase tracking-[0.2em] bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                            sinal: {log.signal}
+                            decisao: {formatSignalLabel(log.decision || log.signal)}
                           </span>
                         )}
                         {log.action && (
@@ -455,6 +490,14 @@ export const BotLogs: React.FC = () => {
 
                       {log.reason && (
                         <p className="text-sm text-amber-400 font-medium">Motivo: {log.reason}</p>
+                      )}
+
+                      {log.market_summary && (
+                        <p className="text-sm text-gray-300 leading-relaxed">{log.market_summary}</p>
+                      )}
+
+                      {log.technical_summary && (
+                        <p className="text-sm text-gray-400 leading-relaxed">{log.technical_summary}</p>
                       )}
 
                       {techSignals.length > 0 && (

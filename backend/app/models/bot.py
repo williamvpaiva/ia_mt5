@@ -45,7 +45,7 @@ class Bot(Base):
     risk_config = Column(JSON, default=lambda: {
         "stop_loss": 200,
         "take_profit": 500,
-        "trailing_stop": {"active": False, "distance": 150, "step": 10},
+        "trailing_stop": {"active": False, "distance": 20, "loss_distance": 10, "step": 10},
         "daily_loss_limit": 500.0,
         "daily_profit_limit": 1000.0,
         "max_positions": 3,

@@ -33,3 +33,7 @@ class Trade(Base):
     swap = Column(Float, default=0.0)                         # Swap/overnight
     magic_number = Column(Integer, index=True, nullable=True) # Identificador Aonico do bot
     comment = Column(Text, nullable=True)                     # ComentA?rio
+
+    @property
+    def status(self) -> str:
+        return "closed" if self.close_time else "open"

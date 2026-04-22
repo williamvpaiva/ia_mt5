@@ -78,6 +78,11 @@ def serialize_log_entry(entry: AutomationLog) -> Dict[str, Any]:
     signal = details.get("signal")
     if signal is None and "final_signal" in details:
         signal = details.get("final_signal")
+    decision = details.get("decision")
+    if signal is None and decision is not None:
+        signal = decision
+    if decision is None and signal is not None:
+        decision = signal
 
     return {
         "id": entry.id,
@@ -92,9 +97,13 @@ def serialize_log_entry(entry: AutomationLog) -> Dict[str, Any]:
         "timeframe": details.get("timeframe"),
         "action": details.get("action"),
         "signal": signal,
+        "decision": decision,
         "market_state": details.get("market_state") or details.get("market_bias"),
         "accepted": details.get("accepted"),
         "reason": details.get("reason") or details.get("entry_block_reason"),
+        "entry_block_reason": details.get("entry_block_reason"),
+        "technical_summary": details.get("technical_summary"),
+        "market_summary": details.get("market_summary"),
         "pnl": details.get("pnl"),
     }
 
@@ -143,15 +152,15 @@ def get_bot_logs(
 
     accepted = sum(1 for item in items if bool(item.get("accepted")))
     rejected = sum(1 for item in items if item.get("accepted") is False)
-    signal_logs = sum(1 for item in items if item.get("context") in {"signal", "trade_accept", "trade_block", "trade_close"})
+    signal_logs = sum(1 for item in items if item.get("context") in {"signal", "trade_accept", "trade_block", "trade_close", "dynamic_stop"})
     train_logs = sum(1 for item in items if item.get("context") == "train")
     sync_logs = sum(1 for item in items if item.get("context") == "sync")
-    market_logs = sum(1 for item in items if item.get("context") in {"market", "signal"})
+    market_logs = sum(1 for item in items if item.get("context") in {"market", "signal", "dynamic_stop"})
 
     latest = items[0] if items else None
     latest_market = None
     for item in items:
-        if item.get("market_state") or item.get("signal"):
+        if item.get("market_state") or item.get("signal") or item.get("context") == "dynamic_stop":
             latest_market = item
             break
 

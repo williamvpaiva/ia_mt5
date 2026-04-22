@@ -70,7 +70,7 @@ const DEFAULT_RISK_CONFIG = {
   max_risk_per_trade: 0.02,
   stop_loss: 200,
   take_profit: 500,
-  trailing_stop: { active: false, distance: 150, step: 10 },
+  trailing_stop: { active: false, distance: 20, loss_distance: 10, step: 10 },
   daily_loss_limit: 500.0,
   daily_profit_limit: 1000.0,
 };
@@ -714,7 +714,7 @@ export const Bots: React.FC = () => {
                 </div>
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Janela</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <input
                       type="time"
                       value={formData.start_time}
@@ -1093,9 +1093,9 @@ export const Bots: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-3">
                         <div className={`w-3 h-3 rounded-full ${formData.risk_config.trailing_stop.active ? 'bg-brand-secondary animate-pulse' : 'bg-gray-700'}`} />
-                        <span className="text-xs font-black text-white">TRAILING STOP</span>
+                        <span className="text-xs font-black text-white">STOP DINAMICO</span>
                       </div>
-                      <p className="text-[10px] text-gray-500 mt-1">Atualiza SL automaticamente.</p>
+                      <p className="text-[10px] text-gray-500 mt-1">Protege lucro com 20 pts e reduz perda com 10 pts.</p>
                     </div>
                     <button
                       onClick={() => setFormData({
@@ -1114,9 +1114,9 @@ export const Bots: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <div className="space-y-2">
-                      <label className="text-[9px] font-black text-gray-500 uppercase">Distância</label>
+                      <label className="text-[9px] font-black text-gray-500 uppercase">Proteção de lucro (pts)</label>
                       <input
                         type="number"
                         className="w-full bg-bg-dark border border-white/5 p-3 rounded-xl text-white font-bold"
@@ -1131,7 +1131,22 @@ export const Bots: React.FC = () => {
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[9px] font-black text-gray-500 uppercase">Passo</label>
+                      <label className="text-[9px] font-black text-gray-500 uppercase">Proteção de perda (pts)</label>
+                      <input
+                        type="number"
+                        className="w-full bg-bg-dark border border-white/5 p-3 rounded-xl text-white font-bold"
+                        value={formData.risk_config.trailing_stop.loss_distance ?? 10}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          risk_config: {
+                            ...formData.risk_config,
+                            trailing_stop: { ...formData.risk_config.trailing_stop, loss_distance: parseFloat(e.target.value || '0') }
+                          }
+                        })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-gray-500 uppercase">Passo do ajuste</label>
                       <input
                         type="number"
                         className="w-full bg-bg-dark border border-white/5 p-3 rounded-xl text-white font-bold"

@@ -18,6 +18,7 @@ from .api.websocket_manager import router as ws_router
 from .core.database import engine, Base
 from .core.config import settings
 from .core.logging_config import setup_logging, metrics
+from .services.bot_manager import bot_manager
 from .services.data_collector import data_collector
 from .services.automation_service import automation_service
 
@@ -46,6 +47,16 @@ async def lifespan(app: FastAPI):
     # Inicia o Servico de Automacao Autonomo (15 min cycle)
     automation_task = asyncio.create_task(automation_service.start())
     logger.info("Servico de Automacao Autonoma iniciado")
+
+    # Reativa bots persistidos como ativos no banco.
+    try:
+        restored_bots = await bot_manager.restore_active_bots()
+        if restored_bots:
+            logger.info("Bots restaurados no startup: %s", restored_bots)
+        else:
+            logger.info("Nenhum bot ativo precisou ser restaurado no startup.")
+    except Exception as exc:
+        logger.error("Falha ao restaurar bots ativos no startup: %s", exc)
     
     yield
     

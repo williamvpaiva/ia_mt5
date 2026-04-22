@@ -11,6 +11,7 @@ from ..core.database import SessionLocal
 from ..models.bot import Bot
 from ..models.historical_data import HistoricalData
 from ..models.trade import Trade
+from .bot_manager import bot_manager
 from .mt5_client import mt5_client
 
 
@@ -167,43 +168,75 @@ async def build_dashboard_snapshot(symbol: Optional[str] = None) -> Dict[str, An
     if account_equity <= 0 and account_balance > 0:
         account_equity = account_balance + account_profit
 
-    today_realized = sum(
+    closed_live_deals = [
+        deal
+        for deal in deals
+        if str(deal.get("entry") or "").lower() in {"out", "out_by", "inout"}
+    ]
+    live_realized_series = [
         _safe_float(deal.get("profit"))
         + _safe_float(deal.get("commission"))
         + _safe_float(deal.get("swap"))
+        for deal in closed_live_deals
+    ]
+    today_realized = sum(live_realized_series)
+    live_closed_count = len(closed_live_deals)
+    live_winning_trades = len([deal for deal in closed_live_deals if (_safe_float(deal.get("profit")) + _safe_float(deal.get("commission")) + _safe_float(deal.get("swap"))) > 0])
+    live_win_rate = (live_winning_trades / live_closed_count * 100) if live_closed_count > 0 else 0
+    live_max_drawdown = _calculate_drawdown(live_realized_series)
+    live_trade_keys = {
+        deal.get("position_id") or deal.get("order") or deal.get("ticket")
         for deal in deals
-        if str(deal.get("entry") or "").lower() in {"out", "out_by", "inout"}
-    )
+        if deal.get("position_id") is not None or deal.get("order") is not None or deal.get("ticket") is not None
+    }
+    live_trade_keys.discard(None)
+    live_total_trades = len(live_trade_keys)
 
     current_spread = _safe_float(tick.get("spread")) if tick else 0.0
     recent_deals = sorted(deals, key=lambda item: _safe_int(item.get("time")), reverse=True)[:5]
 
-    live_total_pnl = total_pnl + floating_pnl
+    db_has_closed_history = closed_count > 0
+    display_total_pnl = total_pnl if db_has_closed_history else today_realized
+    display_win_rate = win_rate if db_has_closed_history else live_win_rate
+    display_max_drawdown = max_drawdown if db_has_closed_history else live_max_drawdown
+    display_total_trades = total_trades if db_has_closed_history else live_total_trades
+    display_closed_trades = closed_count if db_has_closed_history else live_closed_count
+    display_open_trades = len(open_db_trades) if db_has_closed_history else len(positions)
+    display_historical_daily_pnl = today_db_profit if db_has_closed_history and today_db_profit != 0 else today_realized
+    live_total_pnl = display_total_pnl + floating_pnl
     daily_total_pnl = today_realized + floating_pnl
     bridge_connected = bool(status.get("mt5_connected")) if status else False
+    terminal_connected = bool((status or {}).get("terminal", {}).get("connected"))
+    running_bots = len(bot_manager.active_bots)
+    paused_bots = sum(1 for value in bot_manager.trading_paused.values() if value)
 
     return {
         "timestamp": now.isoformat(),
         "symbol": live_symbol,
         "mt5_connected": bridge_connected,
+        "terminal_connected": terminal_connected,
+        "bridge_status": (status or {}).get("status"),
+        "bridge_last_error": (status or {}).get("last_error"),
         "bridge_uptime_seconds": _safe_int(status.get("bridge_uptime_seconds")) if status else 0,
         "terminal_name": (status or {}).get("terminal", {}).get("name"),
         "account_login": _safe_int(account.get("login")) if account.get("login") is not None else None,
         "account_name": account.get("name"),
         "account_server": account.get("server"),
-        "total_pnl": round(total_pnl, 2),
+        "total_pnl": round(display_total_pnl, 2),
         "live_total_pnl": round(live_total_pnl, 2),
         "daily_pnl": round(daily_total_pnl, 2),
         "daily_realized_pnl": round(today_realized, 2),
-        "historical_daily_pnl": round(today_db_profit, 2),
+        "historical_daily_pnl": round(display_historical_daily_pnl, 2),
         "floating_pnl": round(floating_pnl, 2),
-        "win_rate": round(win_rate, 2),
-        "max_drawdown": round(max_drawdown, 2),
+        "win_rate": round(display_win_rate, 2),
+        "max_drawdown": round(display_max_drawdown, 2),
         "active_bots": int(active_bots),
+        "running_bots": int(running_bots),
+        "paused_bots": int(paused_bots),
         "total_candles": int(total_candles),
-        "total_trades": int(total_trades),
-        "open_trades": len(open_db_trades),
-        "closed_trades": len(closed_trades),
+        "total_trades": int(display_total_trades),
+        "open_trades": int(display_open_trades),
+        "closed_trades": int(display_closed_trades),
         "open_positions": len(positions),
         "account_balance": round(account_balance, 2),
         "account_equity": round(account_equity, 2),
@@ -213,6 +246,7 @@ async def build_dashboard_snapshot(symbol: Optional[str] = None) -> Dict[str, An
         "symbol_spread": round(current_spread, 2),
         "recent_trades": [_serialize_deal(deal) for deal in recent_deals] if recent_deals else [_serialize_trade(trade) for trade in recent_db_trades],
         "open_positions_detail": [_serialize_position(position) for position in positions[:10]],
+        "metrics_source": "mt5_live" if not db_has_closed_history else "mt5_live+db",
         "equity_point": {
             "time": now.isoformat(),
             "equity": round(account_equity, 2),

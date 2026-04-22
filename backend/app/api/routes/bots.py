@@ -11,7 +11,7 @@ from ...core.database import get_db
 from ...models.bot import Bot
 from ...schemas.bot import BotCreate, BotResponse, BotUpdate
 from ...services.bot_log_service import get_bot_logs, write_bot_log
-from ...services.bot_manager import bot_manager
+from ...services.bot_manager import TradingSchedule, bot_manager
 from ...services.data_collector import data_collector
 from ...services.progress_manager import progress_manager
 from ...services.trainer import trainer
@@ -153,6 +153,34 @@ def update_bot(bot_id: int, bot_update: BotUpdate, db: Session = Depends(get_db)
                 "changes": changed_values,
             },
         )
+
+    if db_bot.active:
+        schedule = None
+        if db_bot.trading_schedule:
+            try:
+                ts = db_bot.trading_schedule
+                schedule = TradingSchedule(
+                    enabled=ts.get("enabled", True),
+                    start_time=time.fromisoformat(ts.get("start_time", db_bot.start_time or "09:00")),
+                    end_time=time.fromisoformat(ts.get("end_time", db_bot.end_time or "17:50")),
+                    trading_days=ts.get("trading_days", [0, 1, 2, 3, 4, 5, 6]),
+                )
+            except Exception as e:
+                logger.warning("Falha ao sincronizar schedule do bot %s: %s", db_bot.id, e)
+
+        if schedule is None and db_bot.start_time and db_bot.end_time:
+            try:
+                schedule = TradingSchedule(
+                    enabled=True,
+                    start_time=time.fromisoformat(db_bot.start_time),
+                    end_time=time.fromisoformat(db_bot.end_time),
+                    trading_days=[0, 1, 2, 3, 4, 5, 6],
+                )
+            except Exception as e:
+                logger.warning("Falha ao criar schedule legado do bot %s: %s", db_bot.id, e)
+
+        if schedule is not None:
+            bot_manager.set_trading_schedule(db_bot.id, schedule)
 
     return db_bot
 

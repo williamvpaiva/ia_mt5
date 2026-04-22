@@ -1,9 +1,13 @@
+import logging
+from typing import Dict, Optional
+
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
-from typing import Dict, Optional
 
 from ..models.bot import Bot
+
+logger = logging.getLogger("HybridDecisor")
 
 
 class HybridDecisor:
@@ -28,7 +32,6 @@ class HybridDecisor:
         if len(self.df) < 2:
             return signals
 
-        # 1. Direcao de medias
         if self.config.get("ma_cross", {}).get("active"):
             fast = self.config["ma_cross"]["fast_period"]
             slow = self.config["ma_cross"]["slow_period"]
@@ -41,7 +44,6 @@ class HybridDecisor:
             else:
                 signals["ma_cross"] = 0
 
-        # 2. RSI
         if self.config.get("rsi", {}).get("active"):
             period = self.config["rsi"]["period"]
             rsi = ta.rsi(self.df["close"], length=period)
@@ -52,7 +54,6 @@ class HybridDecisor:
             else:
                 signals["rsi"] = 0
 
-        # 3. ATR como confirmacao de rompimento
         if self.config.get("atr", {}).get("active"):
             period = self.config["atr"].get("period", 14)
             multiplier = float(self.config["atr"].get("multiplier", 2.0))
@@ -70,7 +71,6 @@ class HybridDecisor:
                 else:
                     signals["atr"] = 0
 
-        # 4. Price Action: pinbar e engulfing
         price_action = self.config.get("price_action", {})
         if price_action.get("active"):
             enabled_patterns = {str(p).lower() for p in (price_action.get("patterns") or [])}
@@ -139,7 +139,7 @@ class HybridDecisor:
         if not self.ai.get("rl_active") or model is None:
             return 0
 
-        print(f"DEBUG IA [{self.bot.name}]: Verificando IA...")
+        logger.debug("IA [%s]: verificando previsao", self.bot.name)
         cols = ["open", "high", "low", "close", "tick_volume", "EMA_9", "EMA_21", "RSI", "ATR"]
 
         try:
@@ -157,19 +157,22 @@ class HybridDecisor:
                     if probs is not None:
                         confidence = float(probs[0, action_idx].detach().cpu().item())
                         if confidence < threshold:
-                            print(
-                                f"DEBUG IA [{self.bot.name}]: Confiança {confidence:.3f} abaixo do limiar {threshold:.3f}"
+                            logger.debug(
+                                "IA [%s]: confianca %.3f abaixo do limiar %.3f",
+                                self.bot.name,
+                                confidence,
+                                threshold,
                             )
                             return 0
                 except Exception as exc:
-                    print(f"DEBUG IA: nao foi possivel calcular confianca: {exc}")
+                    logger.debug("IA [%s]: nao foi possivel calcular confianca: %s", self.bot.name, exc)
 
             if action_idx == 1:
                 return 1
             if action_idx == 2:
                 return -1
         except Exception as e:
-            print(f"DEBUG IA: Erro ao prever com PPO: {e}")
+            logger.warning("IA [%s]: erro ao prever com PPO: %s", self.bot.name, e)
             return 0
 
         return 0
@@ -182,7 +185,13 @@ class HybridDecisor:
         ai_signal = self.get_ai_prediction(rl_model)
         spy_signal = self.get_spy_signal(spy_status)
 
-        print(f"DEBUG [{self.bot.name}]: Tech={tech_signals} | AI={ai_signal} | Spy={spy_signal}")
+        logger.debug(
+            "[%s]: sinais tecnicos=%s | IA=%s | Spy=%s",
+            self.bot.name,
+            tech_signals,
+            ai_signal,
+            spy_signal,
+        )
 
         if self.ai.get("rl_active") and self.ai.get("mode") == "pure_ia":
             return ai_signal
@@ -210,9 +219,9 @@ class HybridDecisor:
             return 1 if final_vote > 0 else -1 if final_vote < 0 else 0
 
         if final_vote > 0:
-            print(f"DEBUG [{self.bot.name}]: VOTO FINAL COMPRA (+{final_vote})")
+            logger.debug("[%s]: voto final COMPRA (+%s)", self.bot.name, final_vote)
             return 1
         if final_vote < 0:
-            print(f"DEBUG [{self.bot.name}]: VOTO FINAL VENDA ({final_vote})")
+            logger.debug("[%s]: voto final VENDA (%s)", self.bot.name, final_vote)
             return -1
         return 0

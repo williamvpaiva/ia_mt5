@@ -4,6 +4,9 @@ import { clsx } from 'clsx';
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  mt5Connected?: boolean;
+  transportMode?: 'websocket' | 'polling' | 'offline';
+  lastUpdated?: string | null;
 }
 
 const menuItems = [
@@ -16,7 +19,17 @@ const menuItems = [
   { id: 'settings', label: 'Configurações', icon: Settings },
 ];
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  mt5Connected = false,
+  transportMode = 'offline',
+  lastUpdated = null,
+}) => {
+  const connectionLabel = mt5Connected ? 'MT5 ONLINE' : 'MT5 OFFLINE';
+  const transportLabel = transportMode === 'websocket' ? 'tempo real' : transportMode === 'polling' ? 'fallback' : 'sem dados';
+  const updatedLabel = lastUpdated ? new Date(lastUpdated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--';
+
   return (
     <div className="w-64 bg-bg-card border-r border-border-card flex flex-col h-screen">
       <div className="p-6 flex items-center gap-3">
@@ -47,12 +60,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       </nav>
       
       <div className="p-4 border-t border-border-card">
-        <div className="bg-gray-800/30 rounded-2xl p-4 mb-4">
+        <div className={`rounded-2xl p-4 mb-4 border ${mt5Connected ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/10 border-red-500/30'}`}>
           <p className="text-xs text-gray-500 mb-1">Status do Sistema</p>
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-brand-primary rounded-full animate-pulse" />
-            <span className="text-sm font-medium">SINCRO OK</span>
+            <div className={`w-2 h-2 rounded-full animate-pulse ${mt5Connected ? 'bg-brand-primary' : 'bg-red-400'}`} />
+            <span className="text-sm font-medium">{connectionLabel}</span>
           </div>
+          <p className="text-[11px] text-gray-500 mt-2 uppercase tracking-[0.2em]">{transportLabel} • {updatedLabel}</p>
         </div>
         
         <button className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-400/10 rounded-xl transition-colors">
