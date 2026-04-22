@@ -1,0 +1,161 @@
+version: '3.8'
+
+# Correção: Estrutura Docker completa com todos os serviços
+# Prioridade: BAIXA
+
+services:
+  # ========== DATABASES ==========
+  postgres:
+    image: postgres:15-alpine
+    container_name: ia_mt5_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ia_mt5}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups/postgres:/backups
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - full
+
+  redis:
+    image: redis:7-alpine
+    container_name: ia_mt5_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+      - ./backups/redis:/backups
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - full
+
+  # ========== AI SERVICES ==========
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ia_mt5_ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./models:/models
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    networks:
+      - bot_network
+    # GPU support (opcional - NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    profiles:
+      - full
+      - ai
+
+  # ========== BACKEND ==========
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ia_mt5_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ia_mt5}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - MT5_BRIDGE_URL=${MT5_BRIDGE_URL:-http://host.docker.internal:5000}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - full
+      - backend
+
+  # ========== FRONTEND ==========
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ia_mt5_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    ports:
+      - "8501:80" # Mapeia porta 80 do Nginx para 8501 externa
+    networks:
+      - bot_network
+    profiles:
+      - full
+      - frontend
+
+  # ========== MT5 BRIDGE (Documentação) ==========
+  # Nota: Bridge MT5 deve rodar no host Windows
+  # Veja: scripts/mt5_bridge.py
+  # Para rodar em container, requer Windows container e MetaTrader 5 instalado
+
+  # ========== MONITORING (Opcional) ==========
+  # Prometheus, Grafana podem ser adicionados aqui
+
+# ========== VOLUMES ==========
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+# ========== NETWORKS ==========
+networks:
+  bot_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

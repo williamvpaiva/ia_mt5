@@ -1,0 +1,9 @@
+2026-04-21 11:47:25.806 | INFO     | __main__:start:202 - --- INICIANDO BOT SNIPER DIRECIONAL V2 ---
+2026-04-21 11:47:29.688 | INFO     | __main__:setup_account:59 - SET: Alavancagem 5x em 1000PEPE/USDT
+2026-04-21 12:01:22.467 | INFO     | __main__:start:205 - --- INICIANDO BOT SNIPER DIRECIONAL V2 ---
+2026-04-21 12:01:27.761 | INFO     | __main__:setup_account:62 - SET: Alavancagem 5x em 1000PEPE/USDT
+2026-04-21 16:34:08.121 | INFO     | __main__:<module>:226 - Bot finalizado.
+2026-04-22 10:00:50.719 | INFO     | __main__:start:205 - --- INICIANDO BOT SNIPER DIRECIONAL V2 ---
+2026-04-22 10:00:55.539 | INFO     | __main__:setup_account:62 - SET: Alavancagem 5x em 1000PEPE/USDT
+2026-04-22 10:04:48.034 | INFO     | __main__:start:205 - --- INICIANDO BOT SNIPER DIRECIONAL V2 ---
+2026-04-22 10:04:52.014 | INFO     | __main__:setup_account:62 - SET: Alavancagem 5x em 1000PEPE/USDT

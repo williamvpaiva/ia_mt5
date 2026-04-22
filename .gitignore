@@ -1,0 +1,34 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Indicators and TA
+*.csv
+*.json
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Project specifics
+logs/
+data/
+*.log
+*.sqlite
+*.sqlite3
+sql_app.db
+models/*.zip
+models/*.pkl
+
+# Docker
+.docker
+
+# OS
+.DS_Store
+Thumbs.db

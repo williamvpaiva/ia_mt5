@@ -1,0 +1,8 @@
+ccxt
+pandas
+pandas_ta
+python-dotenv
+asyncio
+loguru
+numpy
+rich
