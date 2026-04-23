@@ -11,6 +11,7 @@ from ...core.database import get_db
 from ...models.bot import Bot
 from ...schemas.bot import BotCreate, BotResponse, BotUpdate
 from ...services.bot_log_service import get_bot_logs, write_bot_log
+from ...services.bot_metrics_service import collect_bot_metrics
 from ...services.bot_manager import TradingSchedule, bot_manager
 from ...services.data_collector import data_collector
 from ...services.progress_manager import progress_manager
@@ -65,8 +66,17 @@ def list_bot_logs(
 
 
 @router.get("/", response_model=List[BotResponse])
-def list_bots(db: Session = Depends(get_db)):
-    return db.query(Bot).all()
+async def list_bots(db: Session = Depends(get_db)):
+    bots = db.query(Bot).order_by(Bot.id.asc()).all()
+    metrics_by_bot = await collect_bot_metrics(db, bots)
+
+    items = []
+    for bot in bots:
+        payload = BotResponse.model_validate(bot).model_dump()
+        payload.update(metrics_by_bot.get(int(bot.id), {}))
+        items.append(payload)
+
+    return items
 
 
 @router.post("/", response_model=BotResponse)

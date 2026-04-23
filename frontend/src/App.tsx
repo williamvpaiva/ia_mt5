@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MetricCard } from './components/MetricCard';
-import { Activity, Brain, Eye, RefreshCw, Settings, Wifi, WifiOff } from 'lucide-react';
+import { Activity, Brain, Check, Eye, Layers, RefreshCw, Search, Settings, Wifi, WifiOff, X } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Bots } from './components/Bots';
 import { BotLogs } from './components/BotLogs';
@@ -45,6 +45,21 @@ type DashboardSnapshot = {
   running_bots?: number;
   paused_bots?: number;
   metrics_source?: string;
+  selected_bot_ids?: number[];
+  selected_bot_names?: string[];
+  selected_symbols?: string[];
+  selected_magic_numbers?: number[];
+  bot_scope?: {
+    mode?: 'all' | 'selected';
+    selected?: boolean;
+    requested_bot_ids?: number[];
+    selected_bot_ids?: number[];
+    selected_bot_names?: string[];
+    selected_symbols?: string[];
+    selected_magic_numbers?: number[];
+    scope_count?: number;
+    total_bots?: number;
+  };
   recent_trades?: Array<Record<string, any>>;
   open_positions_detail?: Array<Record<string, any>>;
   equity_point?: {
@@ -53,6 +68,14 @@ type DashboardSnapshot = {
     equity?: number;
     floating_pnl?: number;
   };
+};
+
+type DashboardBotOption = {
+  id: number;
+  name: string;
+  symbol: string;
+  magic_number: number;
+  active: boolean;
 };
 
 type IndicatorKey =
@@ -181,11 +204,41 @@ const normalizeSnapshot = (payload: any): DashboardSnapshot => {
     bridge_last_error: null,
     bridge_status: 'degraded',
     metrics_source: 'mt5_live',
+    selected_bot_ids: [],
+    selected_bot_names: [],
+    selected_symbols: [],
+    selected_magic_numbers: [],
+    bot_scope: {
+      mode: 'all',
+      selected: false,
+      requested_bot_ids: [],
+      selected_bot_ids: [],
+      selected_bot_names: [],
+      selected_symbols: [],
+      selected_magic_numbers: [],
+      scope_count: 0,
+      total_bots: 0,
+    },
     ...source,
   };
 
   snapshot.recent_trades = Array.isArray(source.recent_trades) ? source.recent_trades : [];
   snapshot.open_positions_detail = Array.isArray(source.open_positions_detail) ? source.open_positions_detail : [];
+  snapshot.selected_bot_ids = Array.isArray(source.selected_bot_ids) ? source.selected_bot_ids : [];
+  snapshot.selected_bot_names = Array.isArray(source.selected_bot_names) ? source.selected_bot_names : [];
+  snapshot.selected_symbols = Array.isArray(source.selected_symbols) ? source.selected_symbols : [];
+  snapshot.selected_magic_numbers = Array.isArray(source.selected_magic_numbers) ? source.selected_magic_numbers : [];
+  snapshot.bot_scope = {
+    mode: source.bot_scope?.mode === 'selected' ? 'selected' : 'all',
+    selected: Boolean(source.bot_scope?.selected),
+    requested_bot_ids: Array.isArray(source.bot_scope?.requested_bot_ids) ? source.bot_scope.requested_bot_ids : [],
+    selected_bot_ids: Array.isArray(source.bot_scope?.selected_bot_ids) ? source.bot_scope.selected_bot_ids : [],
+    selected_bot_names: Array.isArray(source.bot_scope?.selected_bot_names) ? source.bot_scope.selected_bot_names : [],
+    selected_symbols: Array.isArray(source.bot_scope?.selected_symbols) ? source.bot_scope.selected_symbols : [],
+    selected_magic_numbers: Array.isArray(source.bot_scope?.selected_magic_numbers) ? source.bot_scope.selected_magic_numbers : [],
+    scope_count: typeof source.bot_scope?.scope_count === 'number' ? source.bot_scope.scope_count : 0,
+    total_bots: typeof source.bot_scope?.total_bots === 'number' ? source.bot_scope.total_bots : 0,
+  };
 
   return snapshot;
 };
@@ -193,6 +246,9 @@ const normalizeSnapshot = (payload: any): DashboardSnapshot => {
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dashboard, setDashboard] = useState<DashboardSnapshot>(normalizeSnapshot({}));
+  const [dashboardBots, setDashboardBots] = useState<DashboardBotOption[]>([]);
+  const [selectedBotIds, setSelectedBotIds] = useState<number[]>([]);
+  const [botSearchTerm, setBotSearchTerm] = useState('');
   const [equityData, setEquityData] = useState<Array<{ time: string; balance: number; equity: number }>>([]);
   const [indicatorPrefs, setIndicatorPrefs] = useState<Record<IndicatorKey, boolean>>(loadIndicatorPrefs);
   const [transportMode, setTransportMode] = useState<'websocket' | 'polling' | 'offline'>('offline');
@@ -241,12 +297,21 @@ function App() {
     appendEquityPoint(snapshot);
   };
 
+  const buildDashboardQuery = (botIds: number[]) => {
+    const params = new URLSearchParams();
+    params.set('t', String(Date.now()));
+    botIds.forEach((botId) => {
+      params.append('bot_ids', String(botId));
+    });
+    return params.toString();
+  };
+
   const fetchDashboard = async (silent = false) => {
     if (!silent) {
       setRefreshing(true);
     }
     try {
-      const response = await fetch(`${apiBase}/dashboard/live?t=${Date.now()}`, {
+      const response = await fetch(`${apiBase}/dashboard/live?${buildDashboardQuery(selectedBotIds)}`, {
         cache: 'no-store',
       });
 
@@ -261,6 +326,23 @@ function App() {
       if (!silent) {
         setRefreshing(false);
       }
+    }
+  };
+
+  const fetchDashboardBots = async () => {
+    try {
+      const response = await fetch(`${apiBase}/bots/?t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Bots request failed with ${response.status}`);
+      }
+
+      const data = await response.json();
+      setDashboardBots(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Erro ao atualizar lista de robos do dashboard:', error);
     }
   };
 
@@ -282,6 +364,49 @@ function App() {
 
   useEffect(() => {
     if (activeTab !== 'dashboard') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshBots = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      await fetchDashboardBots();
+    };
+
+    refreshBots().catch((error) => {
+      console.error('Erro ao carregar robos do dashboard:', error);
+    });
+
+    const interval = window.setInterval(() => {
+      refreshBots().catch((error) => {
+        console.error('Erro ao atualizar robos do dashboard:', error);
+      });
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeTab, apiBase]);
+
+  useEffect(() => {
+    if (selectedBotIds.length === 0) {
+      return;
+    }
+
+    const availableIds = new Set(dashboardBots.map((bot) => bot.id));
+    setSelectedBotIds((prev) => {
+      const next = prev.filter((botId) => availableIds.has(botId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [dashboardBots, selectedBotIds.length]);
+
+  useEffect(() => {
+    if (activeTab !== 'dashboard') {
       stopPolling();
       wsRef.current?.close();
       wsRef.current = null;
@@ -293,7 +418,11 @@ function App() {
 
     const connectDashboardStream = () => {
       try {
-        const wsUrl = `${wsBase}/ws/dashboard`;
+        const wsParams = new URLSearchParams();
+        selectedBotIds.forEach((botId) => {
+          wsParams.append('bot_ids', String(botId));
+        });
+        const wsUrl = wsParams.toString() ? `${wsBase}/ws/dashboard?${wsParams.toString()}` : `${wsBase}/ws/dashboard`;
         const socket = new WebSocket(wsUrl);
         wsRef.current = socket;
 
@@ -345,9 +474,35 @@ function App() {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [activeTab, apiBase, wsBase]);
+  }, [activeTab, apiBase, wsBase, selectedBotIds]);
 
   const historicalDailyPnL = dashboard.historical_daily_pnl || dashboard.daily_realized_pnl;
+  const normalizedBotSearch = botSearchTerm.trim().toLowerCase();
+  const filteredDashboardBots = dashboardBots
+    .filter((bot) => {
+      if (!normalizedBotSearch) return true;
+      return [
+        bot.name,
+        bot.symbol,
+        String(bot.magic_number),
+        bot.active ? 'active' : 'idle',
+      ].some((value) => String(value).toLowerCase().includes(normalizedBotSearch));
+    })
+    .sort((left, right) => {
+      if (left.active !== right.active) {
+        return left.active ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name);
+    });
+  const selectedDashboardBots = selectedBotIds
+    .map((botId) => dashboardBots.find((bot) => bot.id === botId))
+    .filter((bot): bot is DashboardBotOption => Boolean(bot));
+  const dashboardScopeLabel = selectedBotIds.length === 0
+    ? 'Todos os robos'
+    : `${selectedBotIds.length} robo${selectedBotIds.length === 1 ? '' : 's'} selecionado${selectedBotIds.length === 1 ? '' : 's'}`;
+  const dashboardScopeNames = selectedDashboardBots.length > 0
+    ? selectedDashboardBots.map((bot) => bot.name).join(', ')
+    : (dashboard.bot_scope?.selected_bot_names || []).join(', ');
 
   const dashboardCards = [
     {
@@ -519,6 +674,18 @@ function App() {
     }));
   };
 
+  const toggleDashboardBot = (botId: number) => {
+    setSelectedBotIds((prev) => (
+      prev.includes(botId)
+        ? prev.filter((id) => id !== botId)
+        : [...prev, botId]
+    ));
+  };
+
+  const clearDashboardBots = () => {
+    setSelectedBotIds([]);
+  };
+
   const setAllIndicators = (visible: boolean) => {
     const next = DASHBOARD_INDICATORS.reduce((acc, item) => {
       acc[item.id] = visible;
@@ -652,6 +819,104 @@ function App() {
             )}
 
             <div className="bg-bg-card border border-border-card rounded-3xl p-5 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Layers size={16} className="text-brand-primary" />
+                    <h3 className="text-lg font-black text-white">Filtro de robos</h3>
+                  </div>
+                  <p className="text-sm text-gray-400">
+                    Selecione um robo, varios robos ou deixe em branco para ver a visao consolidada de todos.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-3 py-1 rounded-full bg-white/5 text-gray-300 text-[10px] font-black uppercase tracking-[0.2em]">
+                    {dashboardScopeLabel}
+                  </span>
+                  {selectedBotIds.length > 0 && (
+                    <button
+                      onClick={clearDashboardBots}
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-[0.2em] hover:bg-red-500/20 transition-colors"
+                    >
+                      <X size={12} />
+                      Limpar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                    <Search size={12} className="text-brand-primary" />
+                    Buscar robo
+                  </label>
+                  <div className="relative">
+                    <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input
+                      value={botSearchTerm}
+                      onChange={(event) => setBotSearchTerm(event.target.value)}
+                      placeholder="Nome, simbolo ou MG"
+                      className="w-full bg-bg-dark border border-border-card rounded-2xl pl-10 pr-4 py-3 text-white outline-none focus:ring-2 ring-brand-primary/40"
+                    />
+                  </div>
+                  <div className="text-xs text-gray-500 leading-relaxed">
+                    {(dashboard.bot_scope?.total_bots ?? dashboardBots.length) || 0} robos disponiveis.
+                    {dashboardScopeNames ? ` Selecionados: ${dashboardScopeNames}` : ' Visao global ativa.'}
+                  </div>
+                </div>
+
+                <div className="bg-bg-dark/40 border border-white/5 rounded-2xl p-3">
+                  <div className="max-h-48 overflow-y-auto custom-scrollbar pr-1 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={clearDashboardBots}
+                      className={`inline-flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border transition-all ${
+                        selectedBotIds.length === 0
+                          ? 'bg-brand-primary/10 text-brand-primary border-brand-primary/30'
+                          : 'bg-white/5 text-gray-300 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      {selectedBotIds.length === 0 ? <Check size={12} /> : <span className="w-2 h-2 rounded-full bg-brand-primary" />}
+                      Todos os robos
+                    </button>
+
+                    {filteredDashboardBots.length > 0 ? (
+                      filteredDashboardBots.map((bot) => {
+                        const selected = selectedBotIds.includes(bot.id);
+
+                        return (
+                          <button
+                            key={bot.id}
+                            type="button"
+                            onClick={() => toggleDashboardBot(bot.id)}
+                            className={`inline-flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border transition-all ${
+                              selected
+                                ? 'bg-brand-primary/10 text-brand-primary border-brand-primary/30'
+                                : 'bg-white/5 text-gray-300 border-white/10 hover:text-white'
+                            }`}
+                            title={`${bot.name} | ${bot.symbol} | MG ${bot.magic_number}`}
+                          >
+                            {selected ? (
+                              <Check size={12} />
+                            ) : (
+                              <span className={`w-2 h-2 rounded-full ${bot.active ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+                            )}
+                            <span className="max-w-[180px] truncate">{bot.name}</span>
+                            <span className="text-[9px] opacity-70">MG {bot.magic_number}</span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="w-full rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-5 text-sm text-gray-500">
+                        Nenhum robo corresponde ao filtro atual.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">

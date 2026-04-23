@@ -39,6 +39,14 @@ type BotLogsPayload = {
   };
 };
 
+type BotOption = {
+  id: number;
+  name: string;
+  symbol?: string | null;
+  magic_number?: number | null;
+  active?: boolean;
+};
+
 const CONTEXT_LABELS: Record<string, { label: string; className: string }> = {
   signal: { label: 'Mercado', className: 'bg-sky-500/10 text-sky-400 border-sky-500/20' },
   trade_accept: { label: 'Trade iniciado', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
@@ -100,12 +108,13 @@ const formatMarketStateLabel = (value?: string | null) => {
 
 export const BotLogs: React.FC = () => {
   const [logs, setLogs] = useState<BotLogEntry[]>([]);
+  const [bots, setBots] = useState<BotOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedContext, setSelectedContext] = useState('all');
   const [selectedLevel, setSelectedLevel] = useState('all');
-  const [selectedBot, setSelectedBot] = useState('all');
+  const [selectedBotId, setSelectedBotId] = useState('all');
 
   const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 
@@ -134,35 +143,72 @@ export const BotLogs: React.FC = () => {
     }
   };
 
+  const fetchBots = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/bots/?t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Falha ao buscar robos (${response.status})`);
+      }
+
+      const data = (await response.json()) as BotOption[];
+      setBots(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Erro ao buscar robos para os logs:', error);
+    }
+  };
+
   useEffect(() => {
     fetchLogs();
+    fetchBots();
     const interval = window.setInterval(() => {
       fetchLogs(true);
+      fetchBots();
     }, 5000);
 
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const botOptions = Array.from(
-    new Map(
-      logs
-        .filter((log) => log.bot_id || log.bot_name)
-        .map((log) => [String(log.bot_id ?? log.bot_name), log.bot_name || `Bot ${log.bot_id}`]),
-    ).entries(),
-  );
+  useEffect(() => {
+    if (selectedBotId === 'all') {
+      return;
+    }
+
+    if (!bots.some((bot) => String(bot.id) === selectedBotId)) {
+      setSelectedBotId('all');
+    }
+  }, [bots, selectedBotId]);
+
+  const botNameById = new Map(bots.map((bot) => [bot.id, bot.name]));
+  const botOptions = bots
+    .slice()
+    .sort((left, right) => {
+      if (left.active !== right.active) {
+        return left.active ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+  const resolveBotName = (log: BotLogEntry) => {
+    if (log.bot_id != null && botNameById.has(log.bot_id)) {
+      return botNameById.get(log.bot_id) || log.bot_name || `Bot ${log.bot_id}`;
+    }
+
+    return log.bot_name || (log.bot_id != null ? `Bot ${log.bot_id}` : 'Bot ---');
+  };
 
   const filteredLogs = logs.filter((log) => {
     const matchesSearch =
       normalizeText(log.message).includes(normalizeText(searchTerm)) ||
       normalizeText(log.bot_name).includes(normalizeText(searchTerm)) ||
+      normalizeText(resolveBotName(log)).includes(normalizeText(searchTerm)) ||
       normalizeText(log.symbol).includes(normalizeText(searchTerm)) ||
       normalizeText(log.reason).includes(normalizeText(searchTerm)) ||
       normalizeText(log.market_state).includes(normalizeText(searchTerm));
 
     const matchesContext = selectedContext === 'all' || log.context === selectedContext;
     const matchesLevel = selectedLevel === 'all' || log.level === selectedLevel;
-    const matchesBot = selectedBot === 'all' || String(log.bot_id ?? log.bot_name) === selectedBot;
+    const matchesBot = selectedBotId === 'all' || String(log.bot_id ?? '') === selectedBotId;
 
     return matchesSearch && matchesContext && matchesLevel && matchesBot;
   });
@@ -252,14 +298,16 @@ export const BotLogs: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <select
-              value={selectedBot}
-              onChange={(e) => setSelectedBot(e.target.value)}
+              value={selectedBotId}
+              onChange={(e) => setSelectedBotId(e.target.value)}
               className="w-full bg-bg-dark border border-border-card rounded-2xl px-4 py-3 text-white outline-none"
             >
               <option value="all">Todos os robos</option>
-              {botOptions.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
+              {botOptions.map((bot) => (
+                <option key={bot.id} value={bot.id}>
+                  {bot.name}
+                  {bot.symbol ? ` • ${bot.symbol}` : ''}
+                  {bot.magic_number ? ` • MG ${bot.magic_number}` : ''}
                 </option>
               ))}
             </select>
@@ -335,7 +383,7 @@ export const BotLogs: React.FC = () => {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-gray-500 font-black">Bot</p>
-                  <p className="text-lg font-black text-white">{latestSignal.bot_name || `Bot ${latestSignal.bot_id ?? '---'}`}</p>
+                  <p className="text-lg font-black text-white">{resolveBotName(latestSignal)}</p>
                 </div>
                 <div
                   className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border ${
@@ -437,10 +485,10 @@ export const BotLogs: React.FC = () => {
                         <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border ${levelClass}`}>
                           {log.level}
                         </span>
-                        {log.bot_name && (
+                        {(log.bot_id != null || log.bot_name) && (
                           <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] bg-white/5 text-gray-300 border border-white/10 flex items-center gap-1">
                             <Bot size={12} />
-                            {log.bot_name}
+                            {resolveBotName(log)}
                           </span>
                         )}
                         {log.symbol && (

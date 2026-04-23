@@ -53,6 +53,11 @@ class BotResponse(BotBase):
     winning_trades: int
     losing_trades: int
     total_pnl: float
+    closed_trades: Optional[int] = None
+    open_trades: Optional[int] = None
+    win_rate: Optional[float] = None
+    metrics_source: Optional[str] = None
+    metrics_updated_at: Optional[datetime] = None
     signals_config: Optional[Dict]
     risk_config: Optional[Dict]
     ai_config: Optional[Dict]

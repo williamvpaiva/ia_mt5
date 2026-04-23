@@ -29,6 +29,11 @@ interface Bot {
   total_trades: number;
   winning_trades: number;
   losing_trades: number;
+  closed_trades?: number;
+  open_trades?: number;
+  win_rate?: number;
+  metrics_source?: string;
+  metrics_updated_at?: string;
   excluded_days?: number[];
   start_time?: string;
   end_time?: string;
@@ -464,7 +469,11 @@ export const Bots: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {bots.map((bot) => {
-            const winRate = bot.total_trades > 0 ? (bot.winning_trades / bot.total_trades) * 100 : 0;
+            const winRate = typeof bot.win_rate === 'number'
+              ? bot.win_rate
+              : bot.total_trades > 0
+                ? (bot.winning_trades / bot.total_trades) * 100
+                : 0;
             const progress = progressMap[String(bot.id)];
             const maxSpread = bot.max_spread ?? 0;
             const maxSlippage = bot.max_slippage ?? 0;
